@@ -9,15 +9,67 @@ const VALID_STATUSES = ['open', 'in_progress', 'resolved', 'verified', 'closed',
 const VALID_SEVERITIES = ['blocker', 'critical', 'major', 'normal', 'minor', 'trivial'];
 const VALID_PRIORITIES = ['p1', 'p2', 'p3', 'p4', 'p5'];
 
+const FIELD_LABELS = {
+  title: 'title',
+  description: 'description',
+  status: 'status',
+  resolution: 'resolution',
+  severity: 'severity',
+  priority: 'priority',
+  assignee_id: 'assignee',
+  component_id: 'component',
+  product_id: 'product',
+  due_date: 'due date',
+};
+
+function getUserName(id) {
+  if (!id) return null;
+  const u = db.prepare('SELECT name FROM users WHERE id = ?').get(id);
+  return u ? u.name : null;
+}
+
+function getProductName(id) {
+  if (!id) return null;
+  const p = db.prepare('SELECT name FROM products WHERE id = ?').get(id);
+  return p ? p.name : null;
+}
+
+function getComponentName(id) {
+  if (!id) return null;
+  const c = db.prepare('SELECT name FROM components WHERE id = ?').get(id);
+  return c ? c.name : null;
+}
+
+function resolveFieldValue(field, rawValue) {
+  if (rawValue === null || rawValue === undefined) return null;
+  if (field === 'assignee_id') return getUserName(rawValue) || rawValue;
+  if (field === 'product_id') return getProductName(rawValue) || rawValue;
+  if (field === 'component_id') return getComponentName(rawValue) || rawValue;
+  if (field === 'status') return rawValue.replace('_', ' ');
+  return rawValue;
+}
+
 function notify(userId, bugId, message) {
   if (!userId) return;
   db.prepare('INSERT INTO notifications (id, user_id, bug_id, message) VALUES (?,?,?,?)')
     .run(uuid(), userId, bugId, message);
 }
 
+function notifyWatchers(bugId, excludeUserId, message) {
+  const watchers = db.prepare('SELECT user_id FROM bug_watchers WHERE bug_id = ?').all(bugId);
+  for (const w of watchers) {
+    if (w.user_id !== excludeUserId) {
+      notify(w.user_id, bugId, message);
+    }
+  }
+}
+
 function logActivity(bugId, actorId, field, oldValue, newValue) {
+  const label = FIELD_LABELS[field] || field;
+  const resolvedOld = resolveFieldValue(field, oldValue);
+  const resolvedNew = resolveFieldValue(field, newValue);
   db.prepare('INSERT INTO activity (id, bug_id, actor_id, field, old_value, new_value) VALUES (?,?,?,?,?,?)')
-    .run(uuid(), bugId, actorId, field, oldValue ?? null, newValue ?? null);
+    .run(uuid(), bugId, actorId, label, resolvedOld ?? null, resolvedNew ?? null);
 }
 
 function enrichBug(bug) {
@@ -65,6 +117,76 @@ router.get('/stats/summary', requireAuth, (req, res) => {
   res.json({ byStatus, bySeverity, byProduct, openCount, totalCount, recentlyResolved });
 });
 
+// Duplicate detection: find similar bugs by keyword matching
+router.get('/similar', requireAuth, (req, res) => {
+  const { title = '', description = '' } = req.query;
+  if (!title && !description) return res.json([]);
+
+  const words = `${title} ${description}`
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 3);
+
+  if (words.length === 0) return res.json([]);
+
+  const uniqueWords = [...new Set(words)].slice(0, 8);
+  const conditions = uniqueWords.map(() => '(LOWER(title) LIKE ? OR LOWER(description) LIKE ?)').join(' OR ');
+  const params = uniqueWords.flatMap((w) => [`%${w}%`, `%${w}%`]);
+
+  const bugs = db.prepare(`
+    SELECT * FROM bugs WHERE (${conditions})
+    ORDER BY updated_at DESC LIMIT 5
+  `).all(...params).map(enrichBug);
+
+  res.json(bugs);
+});
+
+// GitHub webhook: auto-resolve bugs when linked PR is merged
+router.post('/github/webhook', (req, res) => {
+  let payload = req.body;
+  if (typeof payload === 'string' || Buffer.isBuffer(payload)) {
+    try {
+      payload = JSON.parse(payload.toString());
+    } catch {
+      return res.status(400).json({ error: 'Invalid JSON payload' });
+    }
+  }
+
+  const secret = process.env.GITHUB_WEBHOOK_SECRET;
+  if (secret) {
+    const crypto = require('crypto');
+    const sig = req.headers['x-hub-signature-256'];
+    const rawBody = Buffer.isBuffer(req.body) ? req.body.toString() : JSON.stringify(req.body);
+    const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+    if (sig !== expected) return res.status(401).json({ error: 'Invalid webhook signature' });
+  }
+
+  const event = req.headers['x-github-event'] || (payload && payload.pull_request ? 'pull_request' : null);
+  if (event === 'pull_request') {
+    const pr = payload.pull_request;
+    if (payload.action === 'closed' && pr && pr.merged) {
+      const prUrl = pr.html_url;
+      const linkedBugs = db.prepare(
+        "SELECT * FROM bugs WHERE github_pr_url = ? AND status NOT IN ('resolved','verified','closed')"
+      ).all(prUrl);
+      for (const bug of linkedBugs) {
+        db.prepare(
+          "UPDATE bugs SET status = 'resolved', resolution = 'fixed', updated_at = datetime('now') WHERE id = ?"
+        ).run(bug.id);
+        db.prepare(
+          'INSERT INTO activity (id, bug_id, actor_id, field, old_value, new_value) VALUES (?,?,?,?,?,?)'
+        ).run(uuid(), bug.id, null, 'status', bug.status.replace('_', ' '), 'resolved');
+        const msg = `Bug "${bug.title}" was automatically resolved — linked PR was merged`;
+        if (bug.reporter_id) notify(bug.reporter_id, bug.id, msg);
+        if (bug.assignee_id) notify(bug.assignee_id, bug.id, msg);
+        notifyWatchers(bug.id, null, msg);
+      }
+    }
+  }
+  res.json({ ok: true });
+});
+
 // Get single bug with comments + activity
 router.get('/:id', requireAuth, (req, res) => {
   const bug = db.prepare('SELECT * FROM bugs WHERE id = ?').get(req.params.id);
@@ -80,9 +202,34 @@ router.get('/:id', requireAuth, (req, res) => {
     SELECT a.*, u.name as actor_name FROM activity a
     LEFT JOIN users u ON a.actor_id = u.id
     WHERE a.bug_id = ? ORDER BY a.created_at ASC
-  `).all(req.params.id);
+  `).all(req.params.id).map((act) => {
+    let field = act.field;
+    let oldValue = act.old_value;
+    let newValue = act.new_value;
+    if (field === 'assignee_id' || field === 'assignee') {
+      field = 'assignee';
+      if (oldValue && getUserName(oldValue)) oldValue = getUserName(oldValue);
+      if (newValue && getUserName(newValue)) newValue = getUserName(newValue);
+    } else if (field === 'product_id' || field === 'product') {
+      field = 'product';
+      if (oldValue && getProductName(oldValue)) oldValue = getProductName(oldValue);
+      if (newValue && getProductName(newValue)) newValue = getProductName(newValue);
+    } else if (field === 'component_id' || field === 'component') {
+      field = 'component';
+      if (oldValue && getComponentName(oldValue)) oldValue = getComponentName(oldValue);
+      if (newValue && getComponentName(newValue)) newValue = getComponentName(newValue);
+    }
+    return { ...act, field, old_value: oldValue, new_value: newValue };
+  });
 
-  res.json({ ...enrichBug(bug), comments, activity });
+  const watching = !!db.prepare('SELECT 1 FROM bug_watchers WHERE bug_id = ? AND user_id = ?')
+    .get(req.params.id, req.user.id);
+  const watcherCount = db.prepare('SELECT COUNT(*) as c FROM bug_watchers WHERE bug_id = ?')
+    .get(req.params.id).c;
+  const commentCount = db.prepare('SELECT COUNT(*) as c FROM comments WHERE bug_id = ?').get(req.params.id).c;
+  const attachmentCount = db.prepare('SELECT COUNT(*) as c FROM attachments WHERE bug_id = ?').get(req.params.id).c;
+
+  res.json({ ...enrichBug(bug), comments, activity, watching, watcherCount, commentCount, attachmentCount });
 });
 
 // Create bug
@@ -99,19 +246,32 @@ router.post('/', requireAuth, (req, res) => {
   `).run(id, title, description || '', product_id || null, component_id || null,
     severity || 'normal', priority || 'p3', req.user.id, assignee_id || null, due_date || null);
 
-  logActivity(id, req.user.id, 'created', null, title);
-  if (assignee_id) notify(assignee_id, id, `You were assigned a new bug: "${title}"`);
+  db.prepare('INSERT INTO activity (id, bug_id, actor_id, field, old_value, new_value) VALUES (?,?,?,?,?,?)')
+    .run(uuid(), id, req.user.id, 'created', null, title);
+
+  if (assignee_id) {
+    const assigneeName = getUserName(assignee_id);
+    if (assigneeName) {
+      db.prepare('INSERT INTO activity (id, bug_id, actor_id, field, old_value, new_value) VALUES (?,?,?,?,?,?)')
+        .run(uuid(), id, req.user.id, 'assignee', null, assigneeName);
+    }
+    notify(assignee_id, id, `You were assigned a new bug: "${title}"`);
+  }
 
   const bug = db.prepare('SELECT * FROM bugs WHERE id = ?').get(id);
   res.status(201).json(enrichBug(bug));
 });
 
-// Update bug (status, assignee, severity, priority, resolution, title/description)
+// Update bug
 router.patch('/:id', requireAuth, (req, res) => {
   const bug = db.prepare('SELECT * FROM bugs WHERE id = ?').get(req.params.id);
   if (!bug) return res.status(404).json({ error: 'Bug not found' });
 
-  const fields = ['title', 'description', 'status', 'resolution', 'severity', 'priority', 'assignee_id', 'component_id', 'product_id', 'due_date'];
+  const fields = [
+    'title', 'description', 'status', 'resolution', 'severity', 'priority',
+    'assignee_id', 'component_id', 'product_id', 'due_date',
+    'github_pr_url', 'github_pr_number', 'github_repo', 'github_pr_title', 'github_pr_state',
+  ];
   const updates = {};
 
   for (const field of fields) {
@@ -123,6 +283,21 @@ router.patch('/:id', requireAuth, (req, res) => {
     }
   }
 
+  // Automatically parse repo & PR number if github_pr_url is updated
+  if (updates.github_pr_url) {
+    const match = updates.github_pr_url.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/i);
+    if (match) {
+      if (!updates.github_repo) updates.github_repo = match[1];
+      if (!updates.github_pr_number) updates.github_pr_number = parseInt(match[2], 10);
+      if (!updates.github_pr_state && !bug.github_pr_state) updates.github_pr_state = 'open';
+    }
+  } else if (updates.github_pr_url === null) {
+    updates.github_repo = null;
+    updates.github_pr_number = null;
+    updates.github_pr_title = null;
+    updates.github_pr_state = null;
+  }
+
   if (Object.keys(updates).length === 0) {
     return res.json(enrichBug(bug));
   }
@@ -131,26 +306,37 @@ router.patch('/:id', requireAuth, (req, res) => {
   const values = Object.values(updates);
   db.prepare(`UPDATE bugs SET ${setClause}, updated_at = datetime('now') WHERE id = ?`).run(...values, req.params.id);
 
+  const prFields = new Set(['github_pr_url', 'github_pr_number', 'github_repo', 'github_pr_title', 'github_pr_state']);
   for (const field of Object.keys(updates)) {
+    if (prFields.has(field)) continue;
     logActivity(req.params.id, req.user.id, field, bug[field], updates[field]);
   }
 
-  // Notify relevant people about status changes or reassignment
+  if (updates.github_pr_url) {
+    db.prepare('INSERT INTO activity (id, bug_id, actor_id, field, old_value, new_value) VALUES (?,?,?,?,?,?)')
+      .run(uuid(), req.params.id, req.user.id, 'github pr', bug.github_pr_url || null, updates.github_pr_url);
+  }
+
   if (updates.status) {
-    notify(bug.reporter_id, req.params.id, `Bug "${bug.title}" status changed to ${updates.status}`);
-    if (bug.assignee_id && bug.assignee_id !== req.user.id) {
-      notify(bug.assignee_id, req.params.id, `Bug "${bug.title}" status changed to ${updates.status}`);
-    }
+    const statusLabel = updates.status.replace('_', ' ');
+    const msg = `Bug "${bug.title}" status changed to ${statusLabel}`;
+    if (bug.reporter_id !== req.user.id) notify(bug.reporter_id, req.params.id, msg);
+    if (bug.assignee_id && bug.assignee_id !== req.user.id) notify(bug.assignee_id, req.params.id, msg);
+    notifyWatchers(req.params.id, req.user.id, msg);
   }
   if (updates.assignee_id) {
     notify(updates.assignee_id, req.params.id, `You were assigned to bug "${bug.title}"`);
+    notifyWatchers(req.params.id, req.user.id, `Bug "${bug.title}" was reassigned`);
+  }
+  if (updates.priority || updates.severity) {
+    notifyWatchers(req.params.id, req.user.id, `Bug "${bug.title}" was updated`);
   }
 
   const updated = db.prepare('SELECT * FROM bugs WHERE id = ?').get(req.params.id);
   res.json(enrichBug(updated));
 });
 
-// Add a comment
+// Add a comment (with @mention support)
 router.post('/:id/comments', requireAuth, (req, res) => {
   const bug = db.prepare('SELECT * FROM bugs WHERE id = ?').get(req.params.id);
   if (!bug) return res.status(404).json({ error: 'Bug not found' });
@@ -163,15 +349,58 @@ router.post('/:id/comments', requireAuth, (req, res) => {
 
   db.prepare("UPDATE bugs SET updated_at = datetime('now') WHERE id = ?").run(req.params.id);
 
-  // Notify reporter + assignee (except the commenter)
+  db.prepare('INSERT INTO activity (id, bug_id, actor_id, field, old_value, new_value) VALUES (?,?,?,?,?,?)')
+    .run(uuid(), req.params.id, req.user.id, 'comment', null, body.trim().slice(0, 120));
+
+  // Handle @mentions
+  const allUsers = db.prepare('SELECT id, name FROM users').all();
+  const sortedUsers = [...allUsers].sort((a, b) => b.name.length - a.name.length);
+  const mentionedUserIds = new Set();
+
+  for (const u of sortedUsers) {
+    const escapedName = u.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const mentionPattern = new RegExp(`@${escapedName}(?=\\s|$|[,!?.;:])`, 'i');
+    if (mentionPattern.test(body) && u.id !== req.user.id && !mentionedUserIds.has(u.id)) {
+      mentionedUserIds.add(u.id);
+      notify(u.id, req.params.id, `${req.user.name} mentioned you in a comment on "${bug.title}"`);
+    }
+  }
+
   [bug.reporter_id, bug.assignee_id].forEach((uid) => {
-    if (uid && uid !== req.user.id) notify(uid, req.params.id, `New comment on "${bug.title}"`);
+    if (uid && uid !== req.user.id && !mentionedUserIds.has(uid)) {
+      notify(uid, req.params.id, `New comment on "${bug.title}"`);
+    }
   });
+
+  const notifiedAlready = new Set([req.user.id, ...mentionedUserIds, bug.reporter_id, bug.assignee_id].filter(Boolean));
+  const watchers = db.prepare('SELECT user_id FROM bug_watchers WHERE bug_id = ?').all(req.params.id);
+  for (const w of watchers) {
+    if (!notifiedAlready.has(w.user_id)) {
+      notify(w.user_id, req.params.id, `New comment on "${bug.title}"`);
+    }
+  }
 
   const comment = db.prepare(`
     SELECT c.*, u.name as author_name FROM comments c JOIN users u ON c.author_id = u.id WHERE c.id = ?
   `).get(id);
   res.status(201).json(comment);
+});
+
+// Watch a bug
+router.post('/:id/watch', requireAuth, (req, res) => {
+  const bug = db.prepare('SELECT id FROM bugs WHERE id = ?').get(req.params.id);
+  if (!bug) return res.status(404).json({ error: 'Bug not found' });
+  const existing = db.prepare('SELECT 1 FROM bug_watchers WHERE bug_id = ? AND user_id = ?').get(req.params.id, req.user.id);
+  if (!existing) {
+    db.prepare('INSERT INTO bug_watchers (bug_id, user_id) VALUES (?,?)').run(req.params.id, req.user.id);
+  }
+  res.json({ watching: true });
+});
+
+// Unwatch a bug
+router.delete('/:id/watch', requireAuth, (req, res) => {
+  db.prepare('DELETE FROM bug_watchers WHERE bug_id = ? AND user_id = ?').run(req.params.id, req.user.id);
+  res.json({ watching: false });
 });
 
 module.exports = router;

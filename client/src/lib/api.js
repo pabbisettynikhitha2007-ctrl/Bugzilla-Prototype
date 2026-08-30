@@ -35,6 +35,13 @@ export const api = {
   updateBug: (id, payload) => request(`/bugs/${id}`, { method: 'PATCH', body: payload }),
   addComment: (id, body) => request(`/bugs/${id}/comments`, { method: 'POST', body: { body } }),
   getStats: () => request('/bugs/stats/summary'),
+  findSimilarBugs: (title, description) => {
+    const qs = new URLSearchParams({ title: title || '', description: description || '' }).toString();
+    return request(`/bugs/similar?${qs}`);
+  },
+
+  watchBug: (id) => request(`/bugs/${id}/watch`, { method: 'POST' }),
+  unwatchBug: (id) => request(`/bugs/${id}/watch`, { method: 'DELETE' }),
 
   listAttachments: (bugId) => request(`/bugs/${bugId}/attachments`),
   uploadAttachment: async (bugId, file) => {

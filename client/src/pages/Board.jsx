@@ -14,6 +14,38 @@ function isOverdue(bug) {
   return new Date(bug.due_date) < new Date();
 }
 
+function computeHealth(bug) {
+  const isClosedStatus = ['resolved', 'verified', 'closed'].includes(bug.status);
+  if (isClosedStatus) return null;
+  const now = new Date();
+  const updated = new Date(bug.updated_at);
+  const created = new Date(bug.created_at);
+  const daysSinceUpdate = Math.floor((now - updated) / (1000 * 60 * 60 * 24));
+  const daysOpen = Math.floor((now - created) / (1000 * 60 * 60 * 24));
+  const isOverdueBug = bug.due_date && new Date(bug.due_date) < now;
+  const overdueDays = isOverdueBug ? Math.ceil((now - new Date(bug.due_date)) / (1000 * 60 * 60 * 24)) : 0;
+  const isUnassigned = !bug.assignee_id;
+  if (daysSinceUpdate >= 7 || (isOverdueBug && overdueDays >= 5) || (daysOpen >= 14 && isUnassigned)) return 'stalled';
+  if (daysSinceUpdate >= 3 || isOverdueBug || (daysOpen >= 7 && isUnassigned)) return 'at_risk';
+  return 'healthy';
+}
+
+function HealthBadge({ bug }) {
+  const health = computeHealth(bug);
+  if (!health) return null;
+  const cfg = {
+    healthy: { cls: 'text-minor border-minor/30 bg-minor/10', label: 'Healthy' },
+    at_risk: { cls: 'text-major border-major/30 bg-major/10', label: 'At Risk' },
+    stalled: { cls: 'text-critical border-critical/30 bg-critical/10', label: 'Stalled' },
+  };
+  const { cls, label } = cfg[health];
+  return (
+    <span className={`inline-flex items-center text-[10px] font-mono uppercase border rounded px-1.5 py-0.5 ${cls}`}>
+      {label}
+    </span>
+  );
+}
+
 export default function Board() {
   const { user } = useAuth();
   const [bugs, setBugs] = useState([]);
@@ -223,6 +255,7 @@ export default function Board() {
                   <th className="px-4 py-2.5 font-medium">Issue</th>
                   <th className="px-4 py-2.5 font-medium">Severity</th>
                   <th className="px-4 py-2.5 font-medium">Status</th>
+                  <th className="px-4 py-2.5 font-medium">Health</th>
                   <th className="px-4 py-2.5 font-medium">Assignee</th>
                   <th className="px-4 py-2.5 font-medium">Updated</th>
                 </tr>
@@ -253,6 +286,7 @@ export default function Board() {
                     </td>
                     <td className="px-4 py-3"><SeverityBadge severity={bug.severity} /></td>
                     <td className="px-4 py-3"><StatusPill status={bug.status} /></td>
+                    <td className="px-4 py-3"><HealthBadge bug={bug} /></td>
                     <td className="px-4 py-3 text-muted">{bug.assignee?.name || '—'}</td>
                     <td className="px-4 py-3 text-muted text-xs">{new Date(bug.updated_at).toLocaleDateString()}</td>
                   </tr>
