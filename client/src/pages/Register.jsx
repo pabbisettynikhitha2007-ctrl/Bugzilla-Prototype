@@ -27,11 +27,11 @@ export default function Register() {
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <div className="inline-flex items-center gap-2 mb-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-accent" />
-            <span className="font-display font-semibold text-xl tracking-tight">Signal</span>
+          <div className="inline-flex items-center gap-3 mb-3">
+            <span className="w-3 h-3 rounded-full bg-accent animate-pulse" />
+            <span className="font-display font-bold text-4xl tracking-tight text-ink">SIGNAL</span>
           </div>
-          <p className="text-muted text-sm">Create your account</p>
+          <p className="text-muted text-sm">Create your account to continue</p>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-surface border border-border rounded-xl p-6 space-y-4">
