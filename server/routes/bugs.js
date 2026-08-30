@@ -200,7 +200,25 @@ router.get('/:id', requireAuth, (req, res) => {
     SELECT a.*, u.name as actor_name FROM activity a
     LEFT JOIN users u ON a.actor_id = u.id
     WHERE a.bug_id = ? ORDER BY a.created_at ASC
-  `).all(req.params.id);
+  `).all(req.params.id).map((act) => {
+    let field = act.field;
+    let oldValue = act.old_value;
+    let newValue = act.new_value;
+    if (field === 'assignee_id' || field === 'assignee') {
+      field = 'assignee';
+      if (oldValue && getUserName(oldValue)) oldValue = getUserName(oldValue);
+      if (newValue && getUserName(newValue)) newValue = getUserName(newValue);
+    } else if (field === 'product_id' || field === 'product') {
+      field = 'product';
+      if (oldValue && getProductName(oldValue)) oldValue = getProductName(oldValue);
+      if (newValue && getProductName(newValue)) newValue = getProductName(newValue);
+    } else if (field === 'component_id' || field === 'component') {
+      field = 'component';
+      if (oldValue && getComponentName(oldValue)) oldValue = getComponentName(oldValue);
+      if (newValue && getComponentName(newValue)) newValue = getComponentName(newValue);
+    }
+    return { ...act, field, old_value: oldValue, new_value: newValue };
+  });
 
   const watching = !!db.prepare('SELECT 1 FROM bug_watchers WHERE bug_id = ? AND user_id = ?')
     .get(req.params.id, req.user.id);
@@ -263,6 +281,21 @@ router.patch('/:id', requireAuth, (req, res) => {
     }
   }
 
+  // Automatically parse repo & PR number if github_pr_url is updated
+  if (updates.github_pr_url) {
+    const match = updates.github_pr_url.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/i);
+    if (match) {
+      if (!updates.github_repo) updates.github_repo = match[1];
+      if (!updates.github_pr_number) updates.github_pr_number = parseInt(match[2], 10);
+      if (!updates.github_pr_state && !bug.github_pr_state) updates.github_pr_state = 'open';
+    }
+  } else if (updates.github_pr_url === null) {
+    updates.github_repo = null;
+    updates.github_pr_number = null;
+    updates.github_pr_title = null;
+    updates.github_pr_state = null;
+  }
+
   if (Object.keys(updates).length === 0) {
     return res.json(enrichBug(bug));
   }
@@ -319,15 +352,15 @@ router.post('/:id/comments', requireAuth, (req, res) => {
 
   // Handle @mentions
   const allUsers = db.prepare('SELECT id, name FROM users').all();
+  const sortedUsers = [...allUsers].sort((a, b) => b.name.length - a.name.length);
   const mentionedUserIds = new Set();
-  const mentionRegex = /@([\w][\w ]{0,30}?)(?=\s|$|[,!?.;])/g;
-  let match;
-  while ((match = mentionRegex.exec(body)) !== null) {
-    const mentioned = match[1].trim().toLowerCase();
-    const foundUser = allUsers.find((u) => u.name.toLowerCase() === mentioned);
-    if (foundUser && foundUser.id !== req.user.id && !mentionedUserIds.has(foundUser.id)) {
-      mentionedUserIds.add(foundUser.id);
-      notify(foundUser.id, req.params.id, `${req.user.name} mentioned you in a comment on "${bug.title}"`);
+
+  for (const u of sortedUsers) {
+    const escapedName = u.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const mentionPattern = new RegExp(`@${escapedName}(?=\\s|$|[,!?.;:])`, 'i');
+    if (mentionPattern.test(body) && u.id !== req.user.id && !mentionedUserIds.has(u.id)) {
+      mentionedUserIds.add(u.id);
+      notify(u.id, req.params.id, `${req.user.name} mentioned you in a comment on "${bug.title}"`);
     }
   }
 

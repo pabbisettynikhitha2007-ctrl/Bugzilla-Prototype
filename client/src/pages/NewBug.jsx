@@ -114,10 +114,16 @@ export default function NewBug() {
                     className="flex items-start gap-3 bg-surface2 border border-border rounded-lg px-3 py-2.5 hover:border-accent/40 transition group"
                   >
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate group-hover:text-accent transition">{b.title}</p>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-mono text-muted">#{b.id.slice(0, 8)}</span>
+                        <p className="text-sm font-medium truncate group-hover:text-accent transition">{b.title}</p>
+                      </div>
                       <div className="flex items-center gap-2 mt-1">
                         <StatusPill status={b.status} />
                         <SeverityBadge severity={b.severity} />
+                        <span className="text-[10px] font-mono uppercase text-muted bg-surface px-1.5 py-0.5 rounded border border-border">
+                          {b.priority?.toUpperCase()}
+                        </span>
                         {b.assignee && <span className="text-xs text-muted">· {b.assignee.name}</span>}
                       </div>
                     </div>

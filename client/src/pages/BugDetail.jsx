@@ -127,7 +127,7 @@ function formatActivityMessage(a) {
     );
   }
   if (field === 'status') {
-    const fmt = (v) => v ? v.replace('_', ' ') : v;
+    const fmt = (v) => v ? v.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : v;
     return (
       <>
         <span className="font-medium text-ink/80">{actor}</span>
@@ -149,12 +149,13 @@ function formatActivityMessage(a) {
     );
   }
   if (field === 'severity') {
+    const cap = (v) => v ? v.charAt(0).toUpperCase() + v.slice(1) : v;
     return (
       <>
         <span className="font-medium text-ink/80">{actor}</span>
         {oldVal
-          ? <>{' changed severity from '}<span className="text-ink/70">{oldVal}</span>{' to '}<span className="text-ink/70 font-medium">{newVal}</span></>
-          : <>{' set severity to '}<span className="text-ink/70 font-medium">{newVal}</span></>}
+          ? <>{' changed severity from '}<span className="text-ink/70">{cap(oldVal)}</span>{' to '}<span className="text-ink/70 font-medium">{cap(newVal)}</span></>
+          : <>{' set severity to '}<span className="text-ink/70 font-medium">{cap(newVal)}</span></>}
       </>
     );
   }
@@ -216,26 +217,35 @@ function formatActivityMessage(a) {
 
 // ─── Comment body with @mention highlighting ──────────────────────────────────
 function CommentBody({ body, users = [] }) {
+  if (!body) return null;
+  if (!users || users.length === 0) return <p className="text-sm text-ink/90 whitespace-pre-wrap">{body}</p>;
+
+  const sortedNames = users
+    .map((u) => u.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .sort((a, b) => b.length - a.length);
+
+  if (sortedNames.length === 0) return <p className="text-sm text-ink/90 whitespace-pre-wrap">{body}</p>;
+
+  const regex = new RegExp(`@(${sortedNames.join('|')})(?=\\s|$|[,!?.;:])`, 'gi');
   const parts = [];
-  const regex = /@([\w][\w ]{0,30}?)(?=\s|$|[,!?.;])/g;
   let lastIndex = 0;
   let match;
+
   while ((match = regex.exec(body)) !== null) {
-    const mentionText = match[1].trim();
-    const isUser = users.some((u) => u.name.toLowerCase() === mentionText.toLowerCase());
-    if (lastIndex < match.index) parts.push(body.slice(lastIndex, match.index));
-    if (isUser) {
-      parts.push(
-        <span key={match.index} className="text-accent font-medium bg-accent/10 px-1 rounded">
-          @{mentionText}
-        </span>
-      );
-    } else {
-      parts.push(match[0]);
+    if (match.index > lastIndex) {
+      parts.push(body.slice(lastIndex, match.index));
     }
+    parts.push(
+      <span key={match.index} className="text-accent font-medium bg-accent/10 px-1 py-0.5 rounded">
+        {match[0]}
+      </span>
+    );
     lastIndex = match.index + match[0].length;
   }
-  if (lastIndex < body.length) parts.push(body.slice(lastIndex));
+  if (lastIndex < body.length) {
+    parts.push(body.slice(lastIndex));
+  }
+
   return <p className="text-sm text-ink/90 whitespace-pre-wrap">{parts}</p>;
 }
 
@@ -304,15 +314,26 @@ function daysOpen(bug) {
   return Math.floor((Date.now() - new Date(bug.created_at)) / (1000 * 60 * 60 * 24));
 }
 
+function computePeopleInvolved(bug) {
+  const people = new Set();
+  if (bug.reporter?.id) people.add(bug.reporter.id);
+  if (bug.assignee?.id) people.add(bug.assignee.id);
+  (bug.comments || []).forEach((c) => { if (c.author_id) people.add(c.author_id); });
+  (bug.activity || []).forEach((a) => { if (a.actor_id) people.add(a.actor_id); });
+  return people.size;
+}
+
 // ─── Bug Summary ──────────────────────────────────────────────────────────────
 function BugSummary({ bug, commentCount, attachmentCount }) {
   const open = daysOpen(bug);
+  const peopleCount = computePeopleInvolved(bug);
   const items = [
     { label: 'Status', value: <StatusPill status={bug.status} /> },
     { label: 'Assignee', value: bug.assignee?.name || <span className="text-muted">Unassigned</span> },
     { label: 'Priority', value: bug.priority?.toUpperCase() },
     { label: 'Severity', value: bug.severity },
     { label: 'Days open', value: open === 0 ? 'Today' : `${open}d` },
+    { label: 'People', value: peopleCount },
     { label: 'Comments', value: commentCount },
     { label: 'Attachments', value: attachmentCount },
     { label: 'Activity', value: bug.activity?.length ?? '—' },
