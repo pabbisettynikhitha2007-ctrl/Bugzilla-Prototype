@@ -143,24 +143,26 @@ router.get('/similar', requireAuth, (req, res) => {
 });
 
 // GitHub webhook: auto-resolve bugs when linked PR is merged
-router.post('/github/webhook', express.raw({ type: '*/*' }), (req, res) => {
+router.post('/github/webhook', (req, res) => {
+  let payload = req.body;
+  if (typeof payload === 'string' || Buffer.isBuffer(payload)) {
+    try {
+      payload = JSON.parse(payload.toString());
+    } catch {
+      return res.status(400).json({ error: 'Invalid JSON payload' });
+    }
+  }
+
   const secret = process.env.GITHUB_WEBHOOK_SECRET;
   if (secret) {
     const crypto = require('crypto');
     const sig = req.headers['x-hub-signature-256'];
-    const body = req.body;
-    const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(body).digest('hex');
+    const rawBody = Buffer.isBuffer(req.body) ? req.body.toString() : JSON.stringify(req.body);
+    const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
     if (sig !== expected) return res.status(401).json({ error: 'Invalid webhook signature' });
   }
 
-  let payload;
-  try {
-    payload = JSON.parse(req.body.toString());
-  } catch {
-    return res.status(400).json({ error: 'Invalid JSON payload' });
-  }
-
-  const event = req.headers['x-github-event'];
+  const event = req.headers['x-github-event'] || (payload && payload.pull_request ? 'pull_request' : null);
   if (event === 'pull_request') {
     const pr = payload.pull_request;
     if (payload.action === 'closed' && pr && pr.merged) {
