@@ -36,10 +36,32 @@ const reporterId = upsertUser('Riya Reporter', 'reporter@demo.com', 'password123
 
 const webProductId = upsertProduct('Web App', 'Customer-facing web application');
 const mobileProductId = upsertProduct('Mobile App', 'iOS and Android client');
+const cloudProductId = upsertProduct('Cloud Platform', 'Backend services, APIs, and cloud infrastructure');
 
-const authComponentId = upsertComponent(webProductId, 'Authentication', 'Login, signup, sessions');
+const authComponentId = upsertComponent(webProductId, 'Authentication', 'Login, signup, sessions, OAuth');
 const uiComponentId = upsertComponent(webProductId, 'UI/UX', 'Frontend rendering and styling');
-const apiComponentId = upsertComponent(mobileProductId, 'API', 'Mobile backend integration');
+upsertComponent(webProductId, 'Dashboard & Analytics', 'Charts, metrics, reporting');
+upsertComponent(webProductId, 'Billing & Payments', 'Subscriptions, checkout, invoices');
+upsertComponent(webProductId, 'Notifications', 'Email alerts and in-app notifications');
+upsertComponent(webProductId, 'User Settings & Profile', 'Account, profile, preferences');
+upsertComponent(webProductId, 'Search & Filters', 'Search bar, filtering, query matching');
+upsertComponent(webProductId, 'Performance & Caching', 'Page load time, asset delivery, caching');
+
+const apiComponentId = upsertComponent(mobileProductId, 'API & Networking', 'Mobile backend integration, REST APIs, payloads');
+upsertComponent(mobileProductId, 'Authentication & Biometrics', 'Login, FaceID, TouchID, session tokens');
+upsertComponent(mobileProductId, 'iOS UI', 'SwiftUI, UIKit views, iOS navigation');
+upsertComponent(mobileProductId, 'Android UI', 'Material design, compose layout, Android views');
+upsertComponent(mobileProductId, 'Push Notifications', 'FCM / APNs push messaging');
+upsertComponent(mobileProductId, 'Offline Sync & Cache', 'Local SQLite storage, sync queue');
+upsertComponent(mobileProductId, 'Camera & Attachments', 'Image picker, media capture, file uploads');
+upsertComponent(mobileProductId, 'Crash Reporting & Logs', 'Telemetry, error logging, diagnostics');
+
+upsertComponent(cloudProductId, 'REST & GraphQL API', 'API routes, middleware, request handling');
+upsertComponent(cloudProductId, 'Database & Migrations', 'SQL schema, indexes, query optimization');
+upsertComponent(cloudProductId, 'Webhooks & Integrations', 'GitHub webhooks, external event dispatch');
+upsertComponent(cloudProductId, 'File Storage Service', 'Attachment uploads, S3 / disk storage');
+upsertComponent(cloudProductId, 'Background Workers', 'Async queues, scheduled tasks');
+upsertComponent(cloudProductId, 'Security & Rate Limiting', 'DDoS defense, throttling, audit trails');
 
 function createBug({ title, description, product_id, component_id, status, severity, priority, reporter_id, assignee_id }) {
   const existing = db.prepare('SELECT id FROM bugs WHERE title = ?').get(title);
