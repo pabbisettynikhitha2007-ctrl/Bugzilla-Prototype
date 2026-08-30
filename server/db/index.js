@@ -24,6 +24,22 @@ function ensureColumn(table, column, definition) {
 }
 ensureColumn('bugs', 'due_date', 'TEXT');
 
+// GitHub PR integration columns
+ensureColumn('bugs', 'github_pr_url', 'TEXT');
+ensureColumn('bugs', 'github_pr_number', 'INTEGER');
+ensureColumn('bugs', 'github_repo', 'TEXT');
+ensureColumn('bugs', 'github_pr_title', 'TEXT');
+ensureColumn('bugs', 'github_pr_state', 'TEXT');
+
+// Bug watchers table (users who want notifications for a bug they don't own)
+conn.exec(`
+  CREATE TABLE IF NOT EXISTS bug_watchers (
+    bug_id TEXT NOT NULL REFERENCES bugs(id),
+    user_id TEXT NOT NULL REFERENCES users(id),
+    created_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (bug_id, user_id)
+  )
+`);
 
 // Thin wrapper so the rest of the app can keep using the same
 // db.prepare(sql).all(...params) / .get(...params) / .run(...params) API
