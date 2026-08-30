@@ -7,7 +7,7 @@ export default function NewBug() {
   const [users, setUsers] = useState([]);
   const [form, setForm] = useState({
     title: '', description: '', product_id: '', component_id: '',
-    severity: 'normal', priority: 'p3', assignee_id: '',
+    severity: 'normal', priority: 'p3', assignee_id: '', due_date: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -127,6 +127,18 @@ export default function NewBug() {
               <option value="">Unassigned</option>
               {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
             </select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs text-muted mb-1.5">Due date (optional)</label>
+            <input
+              type="date"
+              value={form.due_date}
+              onChange={(e) => setForm({ ...form, due_date: e.target.value })}
+              className="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-accent transition"
+            />
           </div>
         </div>
 

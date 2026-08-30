@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS bugs (
   resolution TEXT,                            -- fixed | wontfix | duplicate | invalid | worksforme (set when resolved/closed)
   severity TEXT NOT NULL DEFAULT 'normal',    -- blocker | critical | major | normal | minor | trivial
   priority TEXT NOT NULL DEFAULT 'p3',        -- p1 | p2 | p3 | p4 | p5
+  due_date TEXT,                               -- optional ISO date; used for SLA countdown
   reporter_id TEXT REFERENCES users(id),
   assignee_id TEXT REFERENCES users(id),
   created_at TEXT DEFAULT (datetime('now')),
@@ -69,3 +70,16 @@ CREATE TABLE IF NOT EXISTS notifications (
   is_read INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- File attachments on a bug (screenshots, logs, patches)
+CREATE TABLE IF NOT EXISTS attachments (
+  id TEXT PRIMARY KEY,
+  bug_id TEXT NOT NULL REFERENCES bugs(id),
+  uploader_id TEXT NOT NULL REFERENCES users(id),
+  filename TEXT NOT NULL,       -- name stored on disk
+  original_name TEXT NOT NULL,  -- name shown to users
+  mime_type TEXT,
+  size_bytes INTEGER,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+

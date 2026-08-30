@@ -87,17 +87,17 @@ router.get('/:id', requireAuth, (req, res) => {
 
 // Create bug
 router.post('/', requireAuth, (req, res) => {
-  const { title, description, product_id, component_id, severity, priority, assignee_id } = req.body;
+  const { title, description, product_id, component_id, severity, priority, assignee_id, due_date } = req.body;
   if (!title) return res.status(400).json({ error: 'title is required' });
   if (severity && !VALID_SEVERITIES.includes(severity)) return res.status(400).json({ error: 'invalid severity' });
   if (priority && !VALID_PRIORITIES.includes(priority)) return res.status(400).json({ error: 'invalid priority' });
 
   const id = uuid();
   db.prepare(`
-    INSERT INTO bugs (id, title, description, product_id, component_id, severity, priority, reporter_id, assignee_id, status)
-    VALUES (?,?,?,?,?,?,?,?,?, 'open')
+    INSERT INTO bugs (id, title, description, product_id, component_id, severity, priority, reporter_id, assignee_id, due_date, status)
+    VALUES (?,?,?,?,?,?,?,?,?,?, 'open')
   `).run(id, title, description || '', product_id || null, component_id || null,
-    severity || 'normal', priority || 'p3', req.user.id, assignee_id || null);
+    severity || 'normal', priority || 'p3', req.user.id, assignee_id || null, due_date || null);
 
   logActivity(id, req.user.id, 'created', null, title);
   if (assignee_id) notify(assignee_id, id, `You were assigned a new bug: "${title}"`);
@@ -111,7 +111,7 @@ router.patch('/:id', requireAuth, (req, res) => {
   const bug = db.prepare('SELECT * FROM bugs WHERE id = ?').get(req.params.id);
   if (!bug) return res.status(404).json({ error: 'Bug not found' });
 
-  const fields = ['title', 'description', 'status', 'resolution', 'severity', 'priority', 'assignee_id', 'component_id', 'product_id'];
+  const fields = ['title', 'description', 'status', 'resolution', 'severity', 'priority', 'assignee_id', 'component_id', 'product_id', 'due_date'];
   const updates = {};
 
   for (const field of fields) {

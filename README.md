@@ -71,11 +71,19 @@ Or click "Create one" on the login page to register your own account.
 
 ## What you can do in the app
 
-- **Board:** see all bugs, filter by status/severity/product, search by keyword
-- **New Bug:** report a bug with product/component/severity/priority/assignee
+- **Board:** see all bugs in a **List** or drag-and-drop **Kanban** view, filter by
+  status/severity/product, search by keyword, jump to **My Bugs** with one click,
+  and **export the current results to CSV**
+- **Bulk actions:** select multiple bugs in list view and change their status or
+  assignee all at once
+- **New Bug:** report a bug with product/component/severity/priority/assignee,
+  and an optional **due date**
 - **Bug Detail:** change status (open → in progress → resolved → verified → closed,
-  or reopened), reassign, change severity/priority, comment, and see a full
+  or reopened), reassign, change severity/priority/due date, **attach files**
+  (screenshots, logs, patches — up to 10MB), comment, and see a full
   activity/audit trail of every field change
+- **Overdue tracking:** bugs past their due date are flagged on the board and
+  show a countdown/overdue badge on the detail page
 - **Analytics:** charts for issues by status, severity, and product, plus
   quick stats (open count, resolved in last 7 days)
 - **Notifications:** bell icon shows in-app alerts when you're assigned a bug,
@@ -100,5 +108,6 @@ Or click "Create one" on the login page to register your own account.
 - Swap SQLite for PostgreSQL + add Elasticsearch/Meilisearch for fuzzy search
 - Add WebSockets for truly real-time updates instead of polling
 - Add role-based permissions (e.g., only maintainers can close bugs)
-- Add file attachments (screenshots, logs) to bugs
-- Add a Kanban board view (drag-and-drop between status columns)
+- Add a bug dependency graph ("blocks" / "depends on")
+- Add @mentions in comments with notification tagging
+- Add saved/custom filter presets

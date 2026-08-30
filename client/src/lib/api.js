@@ -36,6 +36,38 @@ export const api = {
   addComment: (id, body) => request(`/bugs/${id}/comments`, { method: 'POST', body: { body } }),
   getStats: () => request('/bugs/stats/summary'),
 
+  listAttachments: (bugId) => request(`/bugs/${bugId}/attachments`),
+  uploadAttachment: async (bugId, file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const token = getToken();
+    const res = await fetch(`${BASE_URL}/bugs/${bugId}/attachments`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Upload failed');
+    return data;
+  },
+  downloadAttachment: async (id, filename) => {
+    const token = getToken();
+    const res = await fetch(`${BASE_URL}/attachments/${id}/download`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error('Download failed');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  },
+  deleteAttachment: (id) => request(`/attachments/${id}`, { method: 'DELETE' }),
+
   listUsers: () => request('/meta/users'),
   listProducts: () => request('/meta/products'),
 
