@@ -48,7 +48,7 @@ export default function Layout() {
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-accent" />
-              <span className="font-display font-semibold tracking-tight">Signal</span>
+              <span className="font-display font-bold text-lg tracking-tight text-ink">SIGNAL</span>
             </div>
             <nav className="flex items-center gap-1">
               <NavLink to="/" end className={navItem}>Board</NavLink>
